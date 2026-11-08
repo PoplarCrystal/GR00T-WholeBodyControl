@@ -100,25 +100,21 @@ class G1Converter(IsaacLabMuJoCoConverter):
     Imports G1 body/DOF/joint mappings from gear_sonic.envs.manager_env.robots.g1.
     """
 
-    def __init__(self):
-        # Lazy import to avoid circular dependency:
-        # order_converter -> g1 -> mdp/__init__ -> commands -> order_converter
-        from gear_sonic.envs.manager_env.robots.g1 import (
-            G1_ISAACLAB_JOINTS,
-            G1_ISAACLAB_TO_MUJOCO_BODY,
-            G1_ISAACLAB_TO_MUJOCO_DOF,
-            G1_MUJOCO_TO_ISAACLAB_BODY,
-            G1_MUJOCO_TO_ISAACLAB_DOF,
-        )
+    def __init__(self, presets: str = "physx"):
+        from gear_sonic.envs.manager_env.robots.g1 import G1_ISAACLAB_TO_MUJOCO_MAPPING
 
-        self.JOINT_NAMES = G1_ISAACLAB_JOINTS
+        try:
+            mapping = G1_ISAACLAB_TO_MUJOCO_MAPPING[presets]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported G1 preset: {presets!r}") from exc
+        self.JOINT_NAMES = mapping["isaaclab_joints"]
         self.DOF_MAPPINGS = {
-            ("isaaclab", "mujoco"): G1_ISAACLAB_TO_MUJOCO_DOF,
-            ("mujoco", "isaaclab"): G1_MUJOCO_TO_ISAACLAB_DOF,
+            ("isaaclab", "mujoco"): mapping["isaaclab_to_mujoco_dof"],
+            ("mujoco", "isaaclab"): mapping["mujoco_to_isaaclab_dof"],
         }
         self.BODY_MAPPINGS = {
-            ("isaaclab", "mujoco"): G1_ISAACLAB_TO_MUJOCO_BODY,
-            ("mujoco", "isaaclab"): G1_MUJOCO_TO_ISAACLAB_BODY,
+            ("isaaclab", "mujoco"): mapping["isaaclab_to_mujoco_body"],
+            ("mujoco", "isaaclab"): mapping["mujoco_to_isaaclab_body"],
         }
 
     # Body subset names for MPJPE metrics (used by reconstruction_trainer)
@@ -179,23 +175,21 @@ class G1Converter(IsaacLabMuJoCoConverter):
 class H2Converter(IsaacLabMuJoCoConverter):
     """H2 robot joint/body order converter between IsaacLab and MuJoCo conventions."""
 
-    def __init__(self):
-        from gear_sonic.envs.manager_env.robots.h2 import (
-            H2_ISAACLAB_JOINTS,
-            H2_ISAACLAB_TO_MUJOCO_BODY,
-            H2_ISAACLAB_TO_MUJOCO_DOF,
-            H2_MUJOCO_TO_ISAACLAB_BODY,
-            H2_MUJOCO_TO_ISAACLAB_DOF,
-        )
+    def __init__(self, presets: str = "physx"):
+        from gear_sonic.envs.manager_env.robots.h2 import H2_ISAACLAB_TO_MUJOCO_MAPPING
 
-        self.JOINT_NAMES = H2_ISAACLAB_JOINTS
+        try:
+            mapping = H2_ISAACLAB_TO_MUJOCO_MAPPING[presets]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported H2 preset: {presets!r}") from exc
+        self.JOINT_NAMES = mapping["isaaclab_joints"]
         self.DOF_MAPPINGS = {
-            ("isaaclab", "mujoco"): H2_ISAACLAB_TO_MUJOCO_DOF,
-            ("mujoco", "isaaclab"): H2_MUJOCO_TO_ISAACLAB_DOF,
+            ("isaaclab", "mujoco"): mapping["isaaclab_to_mujoco_dof"],
+            ("mujoco", "isaaclab"): mapping["mujoco_to_isaaclab_dof"],
         }
         self.BODY_MAPPINGS = {
-            ("isaaclab", "mujoco"): H2_ISAACLAB_TO_MUJOCO_BODY,
-            ("mujoco", "isaaclab"): H2_MUJOCO_TO_ISAACLAB_BODY,
+            ("isaaclab", "mujoco"): mapping["isaaclab_to_mujoco_body"],
+            ("mujoco", "isaaclab"): mapping["mujoco_to_isaaclab_body"],
         }
 
     VR_3POINTS_BODY_NAMES = ["torso_link", "left_wrist_pitch_link", "right_wrist_pitch_link"]

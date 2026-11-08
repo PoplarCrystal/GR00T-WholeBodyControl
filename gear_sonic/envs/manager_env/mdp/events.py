@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from isaaclab.assets import Articulation
-from isaaclab.envs.mdp.events import _randomize_prop_by_op, randomize_rigid_body_com
+from isaaclab.envs.mdp.events import (
+    _randomize_prop_by_op,
+    randomize_rigid_body_com as randomize_rigid_body_com,
+    randomize_rigid_body_material as randomize_rigid_body_material,
+)
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.configclass import configclass
 import torch
@@ -66,7 +70,7 @@ def randomize_joint_default_pos(
     if asset_cfg.joint_ids == slice(None):
         joint_ids = slice(None)  # for optimization purposes
     else:
-        joint_ids = torch.tensor(asset_cfg.joint_ids, dtype=torch.int, device=asset.device)
+        joint_ids = torch.as_tensor(asset_cfg.joint_ids, dtype=torch.int, device=asset.device)
 
     if pos_distribution_params is not None:
         pos = asset.data.default_joint_pos.to(asset.device).clone()
@@ -100,4 +104,4 @@ def randomize_joint_default_pos(
 
 # Isaac Lab 3 moved COM randomization to the unified articulation API. The
 # official manager term keeps the same range/operation semantics and supports
-# the PhysX backend used by this project.
+# both PhysX and Newton backends.

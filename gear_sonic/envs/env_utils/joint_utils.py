@@ -75,9 +75,16 @@ def _get_joint_indices_by_names(asset, joint_names: list, cache: dict) -> torch.
     return indices_tensor
 
 
-def get_body_joint_indices(asset) -> torch.Tensor:
-    """Get indices of body joints (29 DOF) using G1_ISAACLab_ORDER."""
-    return _get_joint_indices_by_names(asset, G1_ISAACLab_ORDER, _body_joint_indices_cache)
+def get_body_joint_indices(asset, presets="physx") -> torch.Tensor:
+    """Get G1 body joint indices in the selected backend's motion order."""
+    joint_names = G1_ISAACLab_ORDER
+    if presets == "newton":
+        from gear_sonic.envs.manager_env.robots.g1 import G1_ISAACLAB_TO_MUJOCO_DOF
+
+        joint_names = [joint_names[index] for index in G1_ISAACLAB_TO_MUJOCO_DOF]
+    elif presets != "physx":
+        raise ValueError(f"Unsupported presets={presets!r}; expected 'physx' or 'newton'.")
+    return _get_joint_indices_by_names(asset, joint_names, _body_joint_indices_cache)
 
 
 def get_hand_joint_indices(asset) -> torch.Tensor:

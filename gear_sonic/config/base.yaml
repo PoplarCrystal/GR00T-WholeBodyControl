@@ -11,6 +11,7 @@ defaults:
 
 num_gpus: 1
 max_retries: 1
+presets: physx # Physics backend: physx or newton.
 
 # These are global variables that all levels of the config can access.
 ## Experiment setup

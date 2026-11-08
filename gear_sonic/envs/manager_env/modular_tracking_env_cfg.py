@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import dataclasses
 import os
 import re
@@ -7,17 +8,63 @@ import re
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg, ViewerCfg
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import CameraCfg, ContactSensorCfg, FrameTransformerCfg, TiledCameraCfg
+from isaaclab.sensors import CameraCfg, FrameTransformerCfg, TiledCameraCfg
 import isaaclab.sim as sim_utils
 from isaaclab.sim.utils import clone
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils.configclass import configclass
+from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+from isaaclab_newton.sensors import ContactSensorCfg as NewtonContactSensorCfg
+from isaaclab_physx.physics import PhysxCfg
+from isaaclab_physx.sensors import ContactSensorCfg as PhysXContactSensorCfg
+from isaaclab_tasks.utils import PresetCfg
 import joblib
 import pxr
 
 from gear_sonic.envs.manager_env.mdp import terrain
 from gear_sonic.envs.manager_env.robots import g1, h2
 from gear_sonic.trl.utils import common
+
+
+@configclass
+class PhysicsCfg(PresetCfg):
+    """Physics configurations selected by the top-level ``presets`` option."""
+
+    physx: PhysxCfg = PhysxCfg(gpu_max_rigid_patch_count=10 * 2**15)
+    newton: NewtonCfg = NewtonCfg(
+        solver_cfg=MJWarpSolverCfg(
+            njmax=256,
+            nconmax=35,
+            cone="pyramidal",
+            impratio=1,
+            integrator="implicitfast",
+            ls_parallel=True,
+            ls_iterations=30,
+            use_mujoco_contacts=False,
+        ),
+        # physics_cfg.default_shape_cfg = NewtonShapeCfg(margin=0.01)
+        # physics_cfg.collision_cfg = NewtonCollisionPipelineCfg(
+        #     max_triangle_pairs=2_500_000,
+        #     # Contact-sensor export needs capacity >= MuJoCo naconmax.
+        #     rigid_contact_max=self.scene.num_envs * 100,
+        # )
+        num_substeps=1,
+        debug_mode=False,
+    )
+    default = physx
+
+
+@configclass
+class ContactSensorPresetCfg(PresetCfg):
+    """Contact sensor configurations selected by the top-level ``presets`` option."""
+
+    physx: PhysXContactSensorCfg = PhysXContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True, force_threshold=10.0
+    )
+    newton: NewtonContactSensorCfg = NewtonContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True, force_threshold=10.0
+    )
+    default = physx
 
 
 def _load_opencv_params_from_usd(usd_path: str) -> dict:
@@ -268,7 +315,7 @@ def _resolve_object_usd_paths(usd_path):
 class MySceneCfg(InteractiveSceneCfg):
     """Configuration for the terrain scene with a legged robot."""
 
-    def __init__(self, config, **kwargs):  # noqa: ARG002
+    def __init__(self, config, presets="physx", **kwargs):  # noqa: ARG002
         super().__init__()
 
         self.num_envs = config.get("num_envs", 4096)
@@ -278,6 +325,11 @@ class MySceneCfg(InteractiveSceneCfg):
         # Allow config to override replicate_physics (default True)
         # Set to False for per-environment randomization (e.g., table size)
         self.replicate_physics = config.get("replicate_physics", True)
+
+        contact_sensor_cfg = getattr(ContactSensorPresetCfg(), presets, None)
+        if contact_sensor_cfg is None:
+            raise ValueError(f"Unsupported presets={presets!r}; expected 'physx' or 'newton'.")
+        contact_sensor_cfg_cls = type(contact_sensor_cfg)
 
         self.eval_camera = None
         if config.get("render_results", False):
@@ -381,11 +433,8 @@ class MySceneCfg(InteractiveSceneCfg):
             #     dynamic_randomize_texture_interval=1.0
             # )
 
-        self.contact_forces = ContactSensorCfg(
+        self.contact_forces = contact_sensor_cfg.replace(
             prim_path="{ENV_REGEX_NS}/Robot/.*",
-            history_length=3,
-            track_air_time=True,
-            force_threshold=10.0,
             debug_vis=False,
         )
 
@@ -572,7 +621,7 @@ class MySceneCfg(InteractiveSceneCfg):
                         "{ENV_REGEX_NS}/Robot/right_hand_middle_1_link",
                         "{ENV_REGEX_NS}/Robot/right_hand_palm_link",
                     ]
-                self.object_to_hand_contact_sensor = ContactSensorCfg(
+                self.object_to_hand_contact_sensor = contact_sensor_cfg_cls(
                     prim_path="{ENV_REGEX_NS}/Object",
                     filter_prim_paths_expr=right_finger_tip_bodies,
                     history_length=2,
@@ -585,7 +634,7 @@ class MySceneCfg(InteractiveSceneCfg):
                     "{ENV_REGEX_NS}/Robot/left_hand_middle_1_link",
                     "{ENV_REGEX_NS}/Robot/left_hand_palm_link",
                 ]
-                self.object_to_left_hand_contact_sensor = ContactSensorCfg(
+                self.object_to_left_hand_contact_sensor = contact_sensor_cfg_cls(
                     prim_path="{ENV_REGEX_NS}/Object",
                     filter_prim_paths_expr=left_finger_tip_bodies,
                     history_length=2,
@@ -704,7 +753,7 @@ class MySceneCfg(InteractiveSceneCfg):
                     "{ENV_REGEX_NS}/Robot/right_hand_thumb_1_link",
                     "{ENV_REGEX_NS}/Robot/right_hand_thumb_2_link",
                 ]
-                self.table_to_hand_contact_sensor = ContactSensorCfg(
+                self.table_to_hand_contact_sensor = contact_sensor_cfg_cls(
                     prim_path="{ENV_REGEX_NS}/Table",
                     filter_prim_paths_expr=table_contact_bodies,
                     history_length=2,
@@ -715,7 +764,7 @@ class MySceneCfg(InteractiveSceneCfg):
             # Sensor is attached to Object, filters for contact with Table
             # force_matrix_w gives shape [num_envs, 1, 1, 3] - force on Object from Table
             if config.get("add_object", False):
-                self.object_to_table_contact_sensor = ContactSensorCfg(
+                self.object_to_table_contact_sensor = contact_sensor_cfg_cls(
                     prim_path="{ENV_REGEX_NS}/Object",
                     filter_prim_paths_expr=["{ENV_REGEX_NS}/Table"],
                     history_length=2,
@@ -741,7 +790,7 @@ class MySceneCfg(InteractiveSceneCfg):
                     "{ENV_REGEX_NS}/Robot/right_hand_thumb_1_link",
                     "{ENV_REGEX_NS}/Robot/right_hand_thumb_2_link",
                 ]
-                self.object_to_robot_contact_sensor = ContactSensorCfg(
+                self.object_to_robot_contact_sensor = contact_sensor_cfg_cls(
                     prim_path="{ENV_REGEX_NS}/Object",
                     filter_prim_paths_expr=right_hand_wrist_links,
                     history_length=2,
@@ -750,7 +799,7 @@ class MySceneCfg(InteractiveSceneCfg):
 
             # Table-to-robot contact sensor: detect when right hand/wrist touches table
             # Used for termination logic (terminate if table contact before object contact)
-            self.table_to_robot_contact_sensor = ContactSensorCfg(
+            self.table_to_robot_contact_sensor = contact_sensor_cfg_cls(
                 prim_path="{ENV_REGEX_NS}/Table",
                 filter_prim_paths_expr=right_hand_wrist_links,
                 history_length=2,
@@ -904,6 +953,7 @@ class ModularTrackingEnvCfg(ManagerBasedRLEnvCfg):
         events,
         curriculum,
         recorders,
+        presets="physx",
         **kwargs,  # noqa: ARG002
     ):
         """Initialize the configuration with Hydra config.
@@ -922,8 +972,9 @@ class ModularTrackingEnvCfg(ManagerBasedRLEnvCfg):
             events,
             curriculum,
             recorders,
+            presets,
         )
-        self.override_settings()
+        self.override_settings(presets)
 
     def _setup_from_hydra(
         self,
@@ -936,11 +987,13 @@ class ModularTrackingEnvCfg(ManagerBasedRLEnvCfg):
         events,
         curriculum,
         recorders,
+        presets,
     ):
         """Setup configuration from Hydra config."""
         self.config = config
+        self.presets = presets
         # Scene settings
-        self.scene = MySceneCfg(config=config)
+        self.scene = MySceneCfg(config=config, presets=presets)
         # Instantiate components using Hydra
         self.actions = common.custom_instantiate(actions, _recursive=True)
         self.observations = common.custom_instantiate(observations, _recursive=True)
@@ -959,7 +1012,7 @@ class ModularTrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.curriculum = common.custom_instantiate(curriculum, _recursive=True)
         self.recorders = common.custom_instantiate(recorders, _recursive=True)
 
-    def override_settings(self):
+    def override_settings(self, presets="physx"):
         config = self.config
         # General settings
         self.decimation = config.get("decimation", 4)
@@ -969,26 +1022,21 @@ class ModularTrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = config.get("sim_dt", 0.005)
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
-        from isaaclab_physx.physics import PhysxCfg
+        physics_cfg = copy.deepcopy(getattr(PhysicsCfg(), presets, None))
+        if physics_cfg is None:
+            raise ValueError(f"Unsupported presets={presets!r}; expected 'physx' or 'newton'.")
+        if presets == "physx":
+            physics_cfg.gpu_max_num_partitions = config.get("gpu_max_num_partitions", 8)
+            physics_cfg.gpu_collision_stack_size = 2 ** config.get("gpu_collision_stack_size_exp", 26)
 
-        physics_cfg = PhysxCfg(
-            gpu_max_rigid_patch_count=10 * 2**15,
-            gpu_max_num_partitions=config.get("gpu_max_num_partitions", 8),
-            gpu_collision_stack_size=2 ** config.get("gpu_collision_stack_size_exp", 26),
-        )
-
-        # Increase PhysX GPU memory only for multi-object scenes
-        # These prevent "totalAggregatePairsCapacity" errors when many objects are spawned
-        # Check if object_usd_path is a directory (multi-object mode)
-        object_usd_path = config.get("object_usd_path", "")
-        if config.get("add_object", False) and (
-            isinstance(object_usd_path, list) or os.path.isdir(object_usd_path)
-        ):
-            # With proper Z-spacing of initial positions, collision pairs should be minimal
-            # These are moderate values that should work for 1000+ envs
-            physics_cfg.gpu_found_lost_pairs_capacity = 2**24  # ~16M
-            physics_cfg.gpu_found_lost_aggregate_pairs_capacity = 2**24
-            physics_cfg.gpu_total_aggregate_pairs_capacity = 2**21  # ~2M
+            # Increase PhysX GPU memory only for multi-object scenes.
+            object_usd_path = config.get("object_usd_path", "")
+            if config.get("add_object", False) and (
+                isinstance(object_usd_path, list) or os.path.isdir(object_usd_path)
+            ):
+                physics_cfg.gpu_found_lost_pairs_capacity = 2**24
+                physics_cfg.gpu_found_lost_aggregate_pairs_capacity = 2**24
+                physics_cfg.gpu_total_aggregate_pairs_capacity = 2**21
         self.sim.physics = physics_cfg
 
         # Viewer settings
@@ -1000,19 +1048,19 @@ class ModularTrackingEnvCfg(ManagerBasedRLEnvCfg):
 
         robot_mapping = {
             "g1_model_12_dex": {
-                "robot_cfg": g1.G1_CYLINDER_MODEL_12_DEX_CFG,
+                "robot_cfg": g1.G1_USD_MODEL_12_DEX_CFG,
                 "action_scale": g1.G1_MODEL_12_ACTION_SCALE,
-                "isaaclab_to_mujoco_mapping": g1.G1_ISAACLAB_TO_MUJOCO_MAPPING,
+                "isaaclab_to_mujoco_mapping": g1.G1_ISAACLAB_TO_MUJOCO_MAPPING[presets],
             },
             "h2": {
                 "robot_cfg": h2.H2_CFG,
                 "action_scale": h2.H2_ACTION_SCALE,
-                "isaaclab_to_mujoco_mapping": h2.H2_ISAACLAB_TO_MUJOCO_MAPPING,
+                "isaaclab_to_mujoco_mapping": h2.H2_ISAACLAB_TO_MUJOCO_MAPPING[presets],
             },
         }
 
         robot_type = config["robot"].get("type", "g1")
-        self.scene.robot = robot_mapping[robot_type]["robot_cfg"].replace(
+        self.scene.robot = copy.deepcopy(robot_mapping[robot_type]["robot_cfg"]).replace(
             prim_path="{ENV_REGEX_NS}/Robot"
         )
         self.actions.joint_pos.scale = robot_mapping[config["robot"].get("type", "g1")][

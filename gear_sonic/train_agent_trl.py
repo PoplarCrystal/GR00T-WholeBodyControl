@@ -104,7 +104,10 @@ def create_manager_env(config, device, args_cli):
 
     from gear_sonic.envs.wrapper.manager_env_wrapper import ManagerEnvWrapper
 
-    env_instance_cfg = custom_instantiate(config.manager_env)
+    selected_preset = config.get("presets", "physx")
+    if selected_preset not in ("physx", "newton"):
+        raise ValueError(f"Unsupported presets={selected_preset!r}; expected 'physx' or 'newton'.")
+    env_instance_cfg = custom_instantiate(config.manager_env, presets=selected_preset)
 
     # Iteratively check the difference in attribute of env_instance_cfg1 and env_instance_cfg, print out the difference
     def compare_attrs(obj1, obj2, prefix=""):

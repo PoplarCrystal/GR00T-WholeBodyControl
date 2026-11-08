@@ -170,16 +170,17 @@ class TrackingCommand(CommandTerm):
             device=self.device,
         )
 
-        isaac_lab_joints = env.cfg.isaaclab_to_mujoco_mapping["isaaclab_joints"]
+        mapping = env.cfg.isaaclab_to_mujoco_mapping
+        isaac_lab_joints = mapping["isaaclab_joints"]
 
-        self.isaaclab_to_mujoco_dof = env.cfg.isaaclab_to_mujoco_mapping["isaaclab_to_mujoco_dof"]
-        self.mujoco_to_isaaclab_dof = env.cfg.isaaclab_to_mujoco_mapping["mujoco_to_isaaclab_dof"]
+        self.isaaclab_to_mujoco_dof = mapping["isaaclab_to_mujoco_dof"]
+        self.mujoco_to_isaaclab_dof = mapping["mujoco_to_isaaclab_dof"]
         self.lower_joint_indices_mujoco = list(range(12))
         self.lower_joint_isaaclab_indices = [
             self.isaaclab_to_mujoco_dof[i] for i in self.lower_joint_indices_mujoco
         ]
-        self.isaaclab_to_mujoco_body = env.cfg.isaaclab_to_mujoco_mapping["isaaclab_to_mujoco_body"]
-        self.mujoco_to_isaaclab_body = env.cfg.isaaclab_to_mujoco_mapping["mujoco_to_isaaclab_body"]
+        self.isaaclab_to_mujoco_body = mapping["isaaclab_to_mujoco_body"]
+        self.mujoco_to_isaaclab_body = mapping["mujoco_to_isaaclab_body"]
         self.running_ref_root_height = torch.zeros(
             self.num_envs, dtype=torch.float, device=self.device
         )
@@ -262,7 +263,9 @@ class TrackingCommand(CommandTerm):
         self.has_dof_mismatch = self.extra_num_dof > 0
 
         if self.has_dof_mismatch:
-            self.body_joint_indices = joint_utils.get_body_joint_indices(self.robot)
+            self.body_joint_indices = joint_utils.get_body_joint_indices(
+                self.robot, presets=env.cfg.presets
+            )
             self.extra_joint_indices = joint_utils.get_hand_joint_indices(self.robot)
             self.extra_default_positions = torch.tensor(
                 self.cfg.hand_default_positions or [0.0] * self.extra_num_dof,
