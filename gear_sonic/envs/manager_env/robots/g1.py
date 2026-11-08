@@ -1,11 +1,13 @@
 # Robot configuration adapted from the BeyondMimic project.
 # See: https://github.com/HybridRobotics/whole_body_tracking
 
+from pathlib import Path
+
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 import isaaclab.sim as sim_utils
 
-ASSET_DIR = "gear_sonic/data/assets"
+ASSET_DIR = str(Path(__file__).resolve().parents[3] / "data" / "assets")
 
 ARMATURE_5020 = 0.003609725
 ARMATURE_7520_14 = 0.010177520
@@ -199,7 +201,6 @@ G1_ISAACLAB_TO_MUJOCO_MAPPING = {
 G1_CYLINDER_MODEL_12_DEX_CFG = ArticulationCfg(
     spawn=sim_utils.UrdfFileCfg(
         fix_base=False,
-        replace_cylinders_with_capsules=True,
         asset_path=f"{ASSET_DIR}/robot_description/urdf/g1/main.urdf",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(

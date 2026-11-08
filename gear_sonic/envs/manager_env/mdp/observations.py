@@ -13,12 +13,12 @@ from isaaclab.utils.math import (
     quat_inv,
     quat_mul,
     subtract_frame_transforms,
+    yaw_quat,
 )
 import torch
 
 from gear_sonic.envs.env_utils import joint_utils
 from gear_sonic.envs.manager_env.mdp import commands, utils
-from gear_sonic.trl.utils import torch_transform
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 # Joint ordering constants (Mujoco order for compatibility)
 G1_MUJOCO_ORDER = [
@@ -915,7 +915,7 @@ def motion_anchor_yaw_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor
         command.anchor_pos_w,
         command.anchor_quat_w,
     )
-    yaw = torch_transform.get_heading_q(ori)
+    yaw = yaw_quat(ori)
     return yaw.view(env.num_envs, -1)
 
 
@@ -1322,7 +1322,7 @@ def head_orn_target_multi_future(env: ManagerBasedEnv, command_name: str) -> tor
         1, command.num_future_frames, 1
     )
     # deheaded_head_quat = quat_mul(head_quat, get_heading_q(quat_inv(root_quat)))
-    deheaded_head_quat = quat_mul(torch_transform.get_heading_q(quat_inv(root_quat)), head_quat)
+    deheaded_head_quat = quat_mul(yaw_quat(quat_inv(root_quat)), head_quat)
     return deheaded_head_quat.view(env.num_envs, -1)
 
 
@@ -1340,7 +1340,7 @@ def vr_3point_orn_target_multi_future(env: ManagerBasedEnv, command_name: str) -
     )
     # deheaded_vr_3point_quat = quat_mul(vr_3point_quat, get_heading_q(quat_inv(root_quat)))
     deheaded_vr_3point_quat = quat_mul(
-        torch_transform.get_heading_q(quat_inv(root_quat)), vr_3point_quat
+        yaw_quat(quat_inv(root_quat)), vr_3point_quat
     )
     return deheaded_vr_3point_quat.view(env.num_envs, -1)
 
@@ -1993,7 +1993,7 @@ def diff_body_pos_future_local(env, command_name: str, flatten: bool = False) ->
     # shape: (num_envs, 1, 1, 4)
     ref_root_pos_w = ref_root_pos_w.clone()
     ref_root_pos_w[..., 2] = 0.0
-    ref_root_quat_w = torch_transform.get_heading_q(ref_root_quat_w)
+    ref_root_quat_w = yaw_quat(ref_root_quat_w)
     ref_root_quat_w = ref_root_quat_w.expand(
         command.num_envs, command.num_future_frames, len(command.cfg.body_names), -1
     )
@@ -2004,7 +2004,7 @@ def diff_body_pos_future_local(env, command_name: str, flatten: bool = False) ->
     robot_root_quat_w = command.robot_anchor_quat_w.unsqueeze(1)
     robot_root_pos_w = robot_root_pos_w.clone()
     robot_root_pos_w[..., 2] = 0.0
-    robot_root_quat_w = torch_transform.get_heading_q(robot_root_quat_w)
+    robot_root_quat_w = yaw_quat(robot_root_quat_w)
     robot_root_quat_w = robot_root_quat_w.expand(command.num_envs, len(command.cfg.body_names), -1)
 
     robot_body_pos_local = quat_apply_inverse(
@@ -2041,7 +2041,7 @@ def diff_body_ori_future_local(env, command_name: str, flatten: bool = False) ->
     )
 
     ref_root_quat_w = command.anchor_quat_w.unsqueeze(1).unsqueeze(2)
-    ref_root_quat_w = torch_transform.get_heading_q(ref_root_quat_w)
+    ref_root_quat_w = yaw_quat(ref_root_quat_w)
     ref_root_quat_w = ref_root_quat_w.expand(
         command.num_envs, command.num_future_frames, len(command.cfg.body_names), -1
     )
@@ -2049,7 +2049,7 @@ def diff_body_ori_future_local(env, command_name: str, flatten: bool = False) ->
     robot_body_quat_w = command.robot_body_quat_w.view(command.num_envs, command.num_bodies, -1)
 
     robot_root_quat_w = command.robot_anchor_quat_w.unsqueeze(1)
-    robot_root_quat_w = torch_transform.get_heading_q(robot_root_quat_w)
+    robot_root_quat_w = yaw_quat(robot_root_quat_w)
     robot_root_quat_w = robot_root_quat_w.expand(command.num_envs, len(command.cfg.body_names), -1)
 
     robot_body_quat_local = quat_mul(
@@ -2093,7 +2093,7 @@ def diff_body_lin_vel_future_local(env, command_name: str, flatten: bool = False
 
     ref_root_quat_w = command.anchor_quat_w.unsqueeze(1).unsqueeze(2)
     # shape: (num_envs, 1, 1, 4)
-    ref_root_quat_w = torch_transform.get_heading_q(ref_root_quat_w)
+    ref_root_quat_w = yaw_quat(ref_root_quat_w)
     ref_root_quat_w = ref_root_quat_w.expand(
         command.num_envs, command.num_future_frames, command.num_bodies, -1
     )
@@ -2101,7 +2101,7 @@ def diff_body_lin_vel_future_local(env, command_name: str, flatten: bool = False
 
     robot_body_lin_vel_w = command.robot_body_lin_vel_w
     robot_root_quat_w = command.robot_anchor_quat_w.unsqueeze(1)
-    robot_root_quat_w = torch_transform.get_heading_q(robot_root_quat_w).expand(
+    robot_root_quat_w = yaw_quat(robot_root_quat_w).expand(
         command.num_envs, command.num_bodies, -1
     )
     robot_body_lin_vel_local = quat_apply_inverse(robot_root_quat_w, robot_body_lin_vel_w)
@@ -2134,7 +2134,7 @@ def diff_body_ang_vel_future_local(env, command_name: str, flatten: bool = False
 
     ref_root_quat_w = command.anchor_quat_w.unsqueeze(1).unsqueeze(2)
     # shape: (num_envs, 1, 1, 4)
-    ref_root_quat_w = torch_transform.get_heading_q(ref_root_quat_w)
+    ref_root_quat_w = yaw_quat(ref_root_quat_w)
     ref_root_quat_w = ref_root_quat_w.expand(
         command.num_envs, command.num_future_frames, command.num_bodies, -1
     )
@@ -2142,7 +2142,7 @@ def diff_body_ang_vel_future_local(env, command_name: str, flatten: bool = False
 
     robot_body_ang_vel_w = command.robot_body_ang_vel_w
     robot_root_quat_w = command.robot_anchor_quat_w.unsqueeze(1)
-    robot_root_quat_w = torch_transform.get_heading_q(robot_root_quat_w).expand(
+    robot_root_quat_w = yaw_quat(robot_root_quat_w).expand(
         command.num_envs, command.num_bodies, -1
     )
     robot_body_ang_vel_local = quat_apply_inverse(robot_root_quat_w, robot_body_ang_vel_w)
@@ -2175,7 +2175,7 @@ def height_map(env: ManagerBasedEnv, command_name, random=False) -> torch.Tensor
     scan_dot_pos_w = command.scan_dot_pos_w
 
     robot_root_quat_w_yaw = (
-        torch_transform.get_heading_q(robot_root_quat_w)
+        yaw_quat(robot_root_quat_w)
         .unsqueeze(1)
         .unsqueeze(2)
         .expand(-1, command.num_rays_x, command.num_rays_y, -1)

@@ -593,7 +593,7 @@ class MotionLibBase:
         return self.body_pos_w_full[motion_steps + length_starts]
 
     def get_body_quat_w_full(self, motion_ids, motion_steps):
-        """Get full body quaternions (all bodies, IsaacLab order, wxyz)."""
+        """Get full body quaternions (all bodies, Isaac Lab XYZW order)."""
         length_starts = self.length_starts[motion_ids]
         return self.body_quat_w_full[motion_steps + length_starts]
 
@@ -1598,12 +1598,13 @@ class MotionLibBase:
             self.dof_pos = self.dof_pos[:, self.m_cfg.mujoco_to_isaaclab_dof]
             self.dof_vel = self.dof_vel[:, self.m_cfg.mujoco_to_isaaclab_dof]
 
-            # Keep full body data (all bodies, IsaacLab order) before slicing
+            # Keep full body data (all bodies, IsaacLab order) before slicing.
+            # The FK pipeline emits XYZW and Isaac Lab 3 uses XYZW throughout
+            # its state, math, and write APIs. Do not convert this reference to
+            # WXYZ: doing so makes root resets and all body-frame math disagree.
             self.num_bodies_full = len(self.m_cfg.mujoco_to_isaaclab_body)
             self.body_pos_w_full = self.body_pos_w[:, self.m_cfg.mujoco_to_isaaclab_body]
-            self.body_quat_w_full = rotations.xyzw_to_wxyz(
-                self.body_quat_w[:, self.m_cfg.mujoco_to_isaaclab_body]
-            )
+            self.body_quat_w_full = self.body_quat_w[:, self.m_cfg.mujoco_to_isaaclab_body]
             self.body_lin_vel_w_full = self.body_lin_vel_w[:, self.m_cfg.mujoco_to_isaaclab_body]
             self.body_ang_vel_w_full = self.body_ang_vel_w[:, self.m_cfg.mujoco_to_isaaclab_body]
 

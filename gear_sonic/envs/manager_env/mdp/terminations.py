@@ -14,17 +14,17 @@ if TYPE_CHECKING:
 
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import ManagerTermBase, SceneEntityCfg, TerminationTermCfg
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 from isaaclab.utils.math import (
     axis_angle_from_quat,
     quat_apply_inverse,
     quat_conjugate,
     quat_error_magnitude,
     quat_mul,
+    yaw_quat,
 )
 
 from gear_sonic.envs.manager_env.mdp.commands import TrackingCommand, _get_body_indexes
-from gear_sonic.trl.utils.torch_transform import get_heading_q
 
 
 @configclass
@@ -425,8 +425,8 @@ class CummBodyPosErrorLocal(_CummErrorMixin):
         ref_root_pos[..., 2] = 0.0
         robot_root_pos[..., 2] = 0.0
 
-        ref_root_quat = get_heading_q(self.command.anchor_quat_w.view(self.num_envs, 1, 4))
-        robot_root_quat = get_heading_q(self.command.robot_anchor_quat_w.view(self.num_envs, 1, 4))
+        ref_root_quat = yaw_quat(self.command.anchor_quat_w.view(self.num_envs, 1, 4))
+        robot_root_quat = yaw_quat(self.command.robot_anchor_quat_w.view(self.num_envs, 1, 4))
         # expand root quaternions to match per-body vectors for quat_apply_inverse
         ref_root_quat = ref_root_quat.expand(ref_body_pos.shape[0], ref_body_pos.shape[1], -1)
         robot_root_quat = robot_root_quat.expand(
@@ -473,8 +473,8 @@ class CummBodyOriErrorLocal(_CummErrorMixin):
         ref_body_quat = self.command.body_quat_w[:, self.motion_body_indices]
         robot_body_quat = self.command.robot_body_quat_w[:, self.robot_body_indices]
 
-        ref_root_quat = get_heading_q(self.command.anchor_quat_w.view(self.num_envs, 1, 4))
-        robot_root_quat = get_heading_q(self.command.robot_anchor_quat_w.view(self.num_envs, 1, 4))
+        ref_root_quat = yaw_quat(self.command.anchor_quat_w.view(self.num_envs, 1, 4))
+        robot_root_quat = yaw_quat(self.command.robot_anchor_quat_w.view(self.num_envs, 1, 4))
         ref_root_quat = ref_root_quat.expand_as(ref_body_quat)
         robot_root_quat = robot_root_quat.expand_as(robot_body_quat)
 

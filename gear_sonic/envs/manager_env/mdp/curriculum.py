@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.terrains import TerrainImporter
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 import torch
 
 if TYPE_CHECKING:

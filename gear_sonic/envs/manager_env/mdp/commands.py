@@ -15,7 +15,7 @@ from isaaclab.managers import CommandTerm, CommandTermCfg
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 from isaaclab.markers.config import DEFORMABLE_TARGET_MARKER_CFG
 import isaaclab.sim as sim_utils
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 from isaaclab.utils.math import (
     matrix_from_quat,
     quat_apply,
@@ -25,6 +25,7 @@ from isaaclab.utils.math import (
     quat_inv,
     quat_mul,
     sample_uniform,
+    yaw_quat,
 )
 import numpy as np
 import torch
@@ -336,7 +337,7 @@ class TrackingCommand(CommandTerm):
         self.body_quat_relative_w = torch.zeros(
             self.num_envs, len(cfg.body_names), 4, device=self.device
         )
-        self.body_quat_relative_w[:, :, 0] = 1.0
+        self.body_quat_relative_w[:, :, 3] = 1.0  # XYZW identity
 
         self.num_future_frames = self.cfg.num_future_frames
         # Motion lib is at target_fps; ref frames are spaced by dt_future_ref_frames (seconds).
@@ -617,7 +618,7 @@ class TrackingCommand(CommandTerm):
         dt_future_ref_frames = motion_lib_cfg.get("dt_future_ref_frames", 0.1)
 
         # Inject body/DOF mapping into motion_lib_cfg so motion_lib handles
-        # body reordering and xyzw→wxyz quaternion conversion at load time.
+        # body and DOF reordering at load time.
 
         isaaclab_to_mujoco_mapping = order_converter.G1Converter().get_isaaclab_to_mujoco_mapping()
         motion_lib_cfg.update(
@@ -1009,7 +1010,7 @@ class TrackingCommand(CommandTerm):
 
         delta_pos_w = robot_anchor_pos_w_repeat.clone()  # Root position of the robot
         delta_pos_w[..., 2] = anchor_pos_w_repeat[..., 2]
-        delta_ori_w = torch_transform.get_heading_q(
+        delta_ori_w = yaw_quat(
             quat_mul(robot_anchor_quat_w_repeat, quat_inv(anchor_quat_w_repeat))
         )
         body_pos_relative_w_multi_frame = delta_pos_w + quat_apply(
@@ -1078,7 +1079,7 @@ class TrackingCommand(CommandTerm):
         anchor_quat_w = body_quat_w[:, :, anchor_body_idx_full, :]  # [N, F, 4]
 
         # Extract heading quaternion using get_heading_q (canonicalize)
-        anchor_heading_quat = torch_transform.get_heading_q(anchor_quat_w.reshape(-1, 4)).reshape(
+        anchor_heading_quat = yaw_quat(anchor_quat_w.reshape(-1, 4)).reshape(
             N, F, 4
         )
         anchor_heading_quat_expanded = anchor_heading_quat.view(N, F, 1, 4).expand(N, F, B, 4)
@@ -1119,7 +1120,7 @@ class TrackingCommand(CommandTerm):
         anchor_quat_w = body_quat_w[:, :, anchor_body_idx_full, :]  # [N, F, 4]
 
         # Extract heading quaternion using get_heading_q (canonicalize)
-        anchor_heading_quat = torch_transform.get_heading_q(anchor_quat_w.reshape(-1, 4)).reshape(
+        anchor_heading_quat = yaw_quat(anchor_quat_w.reshape(-1, 4)).reshape(
             N, F, 4
         )
         anchor_heading_quat_expanded = anchor_heading_quat.view(N, F, 1, 4).expand(N, F, B, 4)
@@ -1178,7 +1179,7 @@ class TrackingCommand(CommandTerm):
 
         # Extract heading quaternion using get_heading_q (canonicalize)
         first_frame_quat = root_quat_w[:, 0:1, :]  # [N, 1, 4]
-        first_frame_heading = torch_transform.get_heading_q(
+        first_frame_heading = yaw_quat(
             first_frame_quat.reshape(-1, 4)
         ).reshape(N, 1, 4)
 
@@ -1273,7 +1274,8 @@ class TrackingCommand(CommandTerm):
             Tensor of shape ``(num_envs, 23 * 6)``.
         """
         smpl_body_pose = self.smpl_body_pose.reshape(-1, 23, 3)
-        quat = torch_transform.angle_axis_to_quaternion(smpl_body_pose)
+        # torch_transform is scalar-first (WXYZ); convert once at the boundary.
+        quat = rotations.wxyz_to_xyzw(torch_transform.angle_axis_to_quaternion(smpl_body_pose))
         mat = matrix_from_quat(quat)
         smpl_body_pose_6d = mat[..., :2].reshape(smpl_body_pose.shape[0], -1)
         return smpl_body_pose_6d
@@ -1287,11 +1289,14 @@ class TrackingCommand(CommandTerm):
         Returns:
             Root quaternions rotated to Z-up frame, ``(N, 4)``.
         """
-        base_rot = torch_transform.angle_axis_to_quaternion(
-            torch.tensor([[np.pi / 2, 0.0, 0.0]]).to(root_quat_y_up)
+        # Keep all command-side quaternion math in Isaac Lab's XYZW convention.
+        base_rot = rotations.wxyz_to_xyzw(
+            torch_transform.angle_axis_to_quaternion(
+                torch.tensor([[np.pi / 2, 0.0, 0.0]]).to(root_quat_y_up)
+            )
         )
         root_quat_z_up = rotations.quat_mul(
-            base_rot.repeat(root_quat_y_up.shape[0], 1), root_quat_y_up, w_last=False
+            base_rot.repeat(root_quat_y_up.shape[0], 1), root_quat_y_up, w_last=True
         )
         return root_quat_z_up
 
@@ -1308,15 +1313,18 @@ class TrackingCommand(CommandTerm):
         smpl_pose = self.motion_lib.get_smpl_pose(
             self.motion_ids, self.motion_start_time_steps + self.time_steps
         )
-        root_quat = torch_transform.angle_axis_to_quaternion(smpl_pose[..., :3]).view(-1, 4)
+        root_quat = rotations.wxyz_to_xyzw(
+            torch_transform.angle_axis_to_quaternion(smpl_pose[..., :3]).view(-1, 4)
+        )
         if self.motion_lib.smpl_y_up:
             root_quat = self.smpl_root_ytoz_up(root_quat)
-        root_quat = rotations.remove_smpl_base_rot(root_quat, w_last=False)
-        root_heading_inv = rotations.calc_heading_quat_inv(root_quat, w_last=False)
-        root_quat_noheading = rotations.quat_mul(root_heading_inv, root_quat, w_last=False)
-        smpl_pose[..., :3] = torch_transform.quaternion_to_angle_axis(root_quat_noheading).view(
-            smpl_pose.shape[:-1] + (3,)
-        )
+        root_quat = rotations.remove_smpl_base_rot(root_quat, w_last=True)
+        root_heading_inv = rotations.calc_heading_quat_inv(root_quat, w_last=True)
+        root_quat_noheading = rotations.quat_mul(root_heading_inv, root_quat, w_last=True)
+        # The legacy axis-angle converter expects WXYZ; convert only at this API boundary.
+        smpl_pose[..., :3] = torch_transform.quaternion_to_angle_axis(
+            rotations.xyzw_to_wxyz(root_quat_noheading)
+        ).view(smpl_pose.shape[:-1] + (3,))
         return smpl_pose
 
     @property
@@ -1329,11 +1337,12 @@ class TrackingCommand(CommandTerm):
         smpl_pose = self.motion_lib.get_smpl_pose(
             self.motion_ids, self.motion_start_time_steps + self.time_steps
         )
-        root_quat = torch_transform.angle_axis_to_quaternion(smpl_pose[..., :3]).view(-1, 4)
+        root_quat = rotations.wxyz_to_xyzw(
+            torch_transform.angle_axis_to_quaternion(smpl_pose[..., :3]).view(-1, 4)
+        )
         if self.motion_lib.smpl_y_up:
             root_quat = self.smpl_root_ytoz_up(root_quat)
-        root_quat = rotations.remove_smpl_base_rot(root_quat, w_last=False)
-        return root_quat
+        return rotations.remove_smpl_base_rot(root_quat, w_last=True)
 
     @property
     def smpl_root_quat_w_multi_future(self) -> torch.Tensor:
@@ -1345,10 +1354,12 @@ class TrackingCommand(CommandTerm):
         smpl_pose = self.motion_lib.get_smpl_pose(
             self.smpl_future_motion_ids, self.smpl_future_time_steps
         )
-        root_quat = torch_transform.angle_axis_to_quaternion(smpl_pose[..., :3]).view(-1, 4)
+        root_quat = rotations.wxyz_to_xyzw(
+            torch_transform.angle_axis_to_quaternion(smpl_pose[..., :3]).view(-1, 4)
+        )
         if self.motion_lib.smpl_y_up:
             root_quat = self.smpl_root_ytoz_up(root_quat)
-        root_quat = rotations.remove_smpl_base_rot(root_quat, w_last=False).view(
+        root_quat = rotations.remove_smpl_base_rot(root_quat, w_last=True).view(
             self.num_envs, self.smpl_num_future_frames, 4
         )
         return root_quat
@@ -1366,10 +1377,12 @@ class TrackingCommand(CommandTerm):
         smpl_pose = self.motion_lib.get_smpl_pose(
             self.smpl_future_motion_ids, self.smpl_future_time_steps
         )
-        root_quat = torch_transform.angle_axis_to_quaternion(smpl_pose[..., :3]).view(-1, 4)
+        root_quat = rotations.wxyz_to_xyzw(
+            torch_transform.angle_axis_to_quaternion(smpl_pose[..., :3]).view(-1, 4)
+        )
         if self.motion_lib.smpl_y_up:
             root_quat = self.smpl_root_ytoz_up(root_quat)
-        root_quat = rotations.remove_smpl_base_rot(root_quat, w_last=False)
+        root_quat = rotations.remove_smpl_base_rot(root_quat, w_last=True)
         root_rot_dif = quat_mul(
             quat_inv(
                 self.robot_anchor_quat_w.view(self.num_envs, 1, 4).repeat(
@@ -1396,12 +1409,14 @@ class TrackingCommand(CommandTerm):
         smpl_pose = self.motion_lib.get_smpl_pose(
             self.smpl_future_motion_ids, self.smpl_future_time_steps
         )
-        smpl_root_quat = torch_transform.angle_axis_to_quaternion(smpl_pose[..., :3]).view(-1, 4)
+        smpl_root_quat = rotations.wxyz_to_xyzw(
+            torch_transform.angle_axis_to_quaternion(smpl_pose[..., :3]).view(-1, 4)
+        )
         if self.motion_lib.smpl_y_up:
             smpl_root_quat = self.smpl_root_ytoz_up(smpl_root_quat)
-        smpl_root_quat = rotations.remove_smpl_base_rot(smpl_root_quat, w_last=False)
+        smpl_root_quat = rotations.remove_smpl_base_rot(smpl_root_quat, w_last=True)
         smpl_root_quat = smpl_root_quat.view(self.num_envs, self.smpl_num_future_frames, 4)
-        ref_first_heading = torch_transform.get_heading_q(smpl_root_quat[:, 0, :])
+        ref_first_heading = yaw_quat(smpl_root_quat[:, 0, :])
         root_rot_dif = quat_mul(
             quat_inv(
                 ref_first_heading.view(self.num_envs, 1, 4).expand(
@@ -1427,10 +1442,12 @@ class TrackingCommand(CommandTerm):
         smpl_pose = self.motion_lib.get_smpl_pose(
             self.smpl_future_motion_ids, self.smpl_future_time_steps
         )
-        root_quat = torch_transform.angle_axis_to_quaternion(smpl_pose[..., :3]).view(-1, 4)
+        root_quat = rotations.wxyz_to_xyzw(
+            torch_transform.angle_axis_to_quaternion(smpl_pose[..., :3]).view(-1, 4)
+        )
         if self.motion_lib.smpl_y_up:
             root_quat = self.smpl_root_ytoz_up(root_quat)
-        root_quat = rotations.remove_smpl_base_rot(root_quat, w_last=False)
+        root_quat = rotations.remove_smpl_base_rot(root_quat, w_last=True)
         root_rot_dif = quat_mul(
             quat_inv(
                 self.anchor_heading_quat.view(self.num_envs, 1, 4).expand(
@@ -1459,7 +1476,7 @@ class TrackingCommand(CommandTerm):
         smpl_body_pose = self.smpl_body_pose_multi_future.reshape(
             -1, self.smpl_num_future_frames, 23, 3
         )
-        quat = torch_transform.angle_axis_to_quaternion(smpl_body_pose)
+        quat = rotations.wxyz_to_xyzw(torch_transform.angle_axis_to_quaternion(smpl_body_pose))
         mat = matrix_from_quat(quat)
         smpl_body_pose_6d = mat[..., :2].reshape(smpl_body_pose.shape[0], -1)
         return smpl_body_pose_6d
@@ -1485,35 +1502,42 @@ class TrackingCommand(CommandTerm):
 
     @property
     def soma_root_quat_w(self) -> torch.Tensor:
-        """SOMA root quaternion in Z-up world frame (wxyz)."""
-        root_quat = self.motion_lib.get_soma_root_quat(
-            self.motion_ids, self.motion_start_time_steps + self.time_steps
+        """SOMA root quaternion in Z-up world frame (Isaac Lab XYZW)."""
+        root_quat = rotations.wxyz_to_xyzw(
+            self.motion_lib.get_soma_root_quat(
+                self.motion_ids, self.motion_start_time_steps + self.time_steps
+            )
         )
         if self.motion_lib.soma_y_up:
             root_quat = self.smpl_root_ytoz_up(root_quat)
-        root_quat = rotations.remove_bvh_base_rot(root_quat, w_last=False)
-        return root_quat
+        return rotations.remove_bvh_base_rot(root_quat, w_last=True)
 
     @property
     def soma_root_quat_w_multi_future(self) -> torch.Tensor:
-        """SOMA root quaternion multi-future in Z-up world frame (wxyz)."""
-        root_quat = self.motion_lib.get_soma_root_quat(
-            self.smpl_future_motion_ids, self.smpl_future_time_steps
+        """SOMA root quaternion multi-future in Z-up world frame (XYZW)."""
+        root_quat = rotations.wxyz_to_xyzw(
+            self.motion_lib.get_soma_root_quat(
+                self.smpl_future_motion_ids, self.smpl_future_time_steps
+            )
         )
         if self.motion_lib.soma_y_up:
             root_quat = self.smpl_root_ytoz_up(root_quat)
-        root_quat = rotations.remove_bvh_base_rot(root_quat, w_last=False)
-        return root_quat.view(self.num_envs, self.smpl_num_future_frames, 4)
+        root_quat = rotations.remove_bvh_base_rot(root_quat, w_last=True)
+        return root_quat.view(
+            self.num_envs, self.smpl_num_future_frames, 4
+        )
 
     @property
     def soma_root_quat_w_dif_l_multi_future(self) -> torch.Tensor:
         """SOMA root orientation relative to robot anchor, as 6D rotation matrix."""
-        root_quat = self.motion_lib.get_soma_root_quat(
-            self.smpl_future_motion_ids, self.smpl_future_time_steps
+        root_quat = rotations.wxyz_to_xyzw(
+            self.motion_lib.get_soma_root_quat(
+                self.smpl_future_motion_ids, self.smpl_future_time_steps
+            )
         )
         if self.motion_lib.soma_y_up:
             root_quat = self.smpl_root_ytoz_up(root_quat)
-        root_quat = rotations.remove_bvh_base_rot(root_quat, w_last=False)
+        root_quat = rotations.remove_bvh_base_rot(root_quat, w_last=True)
         root_rot_dif = quat_mul(
             quat_inv(
                 self.robot_anchor_quat_w.view(self.num_envs, 1, 4).repeat(
@@ -1555,8 +1579,12 @@ class TrackingCommand(CommandTerm):
 
     @property
     def object_root_quat(self) -> torch.Tensor:
-        return self.motion_lib.get_object_root_quat(
-            self.motion_ids, self.motion_start_time_steps + self.time_steps
+        # Motion files / MotionLib store object rotations as WXYZ. Expose only
+        # XYZW in the command API, like robot state and all Isaac Lab math.
+        return rotations.wxyz_to_xyzw(
+            self.motion_lib.get_object_root_quat(
+                self.motion_ids, self.motion_start_time_steps + self.time_steps
+            )
         )
 
     def _get_object_pos_with_offset(self, env_ids: torch.Tensor) -> torch.Tensor:
@@ -1619,7 +1647,9 @@ class TrackingCommand(CommandTerm):
         object_root_quat = self.motion_lib.get_object_root_quat(
             self.future_motion_ids, self.future_time_steps
         )
-        return object_root_quat.view(self.num_envs, self.num_future_frames, -1, 4)
+        return rotations.wxyz_to_xyzw(object_root_quat).view(
+            self.num_envs, self.num_future_frames, -1, 4
+        )
 
     def _get_contact_center_world(self, hand: str) -> torch.Tensor | None:
         """Get object contact center in world frame for the given hand.
@@ -1642,7 +1672,7 @@ class TrackingCommand(CommandTerm):
 
         from gear_sonic.isaac_utils import rotations
 
-        rotated_center = rotations.quat_rotate(obj_quat, contact_center, w_last=False)
+        rotated_center = rotations.quat_rotate(obj_quat, contact_center, w_last=True)
         world_center = rotated_center + obj_pos
         return world_center
 
@@ -1912,7 +1942,7 @@ class TrackingCommand(CommandTerm):
         Returns:
             Tensor of shape ``(num_envs, 4)``.
         """
-        return torch_transform.get_heading_q(self.robot_anchor_quat_w)
+        return yaw_quat(self.robot_anchor_quat_w)
 
     # @property
     # def body_quat_dif_l(self) -> torch.Tensor:
@@ -2021,7 +2051,7 @@ class TrackingCommand(CommandTerm):
             self.future_motion_ids, self.future_time_steps
         ).view(self.num_envs, self.num_future_frames, 4)
         # Use the heading of the first future frame as the canonical frame
-        ref_first_heading = torch_transform.get_heading_q(ref_root_quat[:, 0, :])
+        ref_first_heading = yaw_quat(ref_root_quat[:, 0, :])
         root_rot_dif = quat_mul(
             quat_inv(
                 ref_first_heading.view(self.num_envs, 1, 4).expand(-1, self.num_future_frames, -1)
@@ -2044,7 +2074,7 @@ class TrackingCommand(CommandTerm):
         ref_root_quat = self.motion_lib.get_root_quat_w(
             self.future_motion_ids, self.future_time_steps
         ).view(self.num_envs, self.num_future_frames, 4)
-        ref_first_heading = torch_transform.get_heading_q(ref_root_quat[:, 0, :])
+        ref_first_heading = yaw_quat(ref_root_quat[:, 0, :])
         heading_diff = quat_mul(quat_inv(self.anchor_heading_quat), ref_first_heading)
         mat = matrix_from_quat(heading_diff)
         return mat[..., :2].reshape(self.num_envs, -1)  # (num_envs, 6)
@@ -2180,7 +2210,7 @@ class TrackingCommand(CommandTerm):
         Returns:
             torch.Tensor: 6D rotation matrix representation, shape (num_envs, 6)
         """
-        ref_heading = torch_transform.get_heading_q(self.anchor_quat_w)
+        ref_heading = yaw_quat(self.anchor_quat_w)
         ori = quat_mul(quat_inv(ref_heading), self.anchor_quat_w)
         mat = matrix_from_quat(ori)
         return mat[..., :2].reshape(self.num_envs, -1)
@@ -2717,7 +2747,7 @@ class TrackingCommand(CommandTerm):
 
         For GeniHOI data:
             - table_pos: [x, y, z] center position of the table
-            - table_quat: [w, x, y, z] quaternion (identity for cuboid tables)
+            - table_quat: [x, y, z, w] quaternion (identity for cuboid tables)
             - table_size: [width, depth, thickness] dimensions of the table
 
         For GRAB data:
@@ -2749,7 +2779,7 @@ class TrackingCommand(CommandTerm):
                         meta.get("table_pos", [0.0, 0.0, 0.8]), device=self.device
                     ).float(),
                     "table_quat": torch.tensor(
-                        meta.get("table_quat", [1.0, 0.0, 0.0, 0.0]), device=self.device
+                        meta.get("table_quat", [0.0, 0.0, 0.0, 1.0]), device=self.device
                     ).float(),
                     "table_size": torch.tensor(
                         meta.get("table_size", [1.0, 0.6, 0.04]), device=self.device
@@ -2836,6 +2866,13 @@ class TrackingCommand(CommandTerm):
 
         return sampled_times
 
+    def _resample(self, env_ids: Sequence[int] | slice):
+        """Normalize Isaac Lab reset slices before the tracking reset handlers."""
+        if isinstance(env_ids, slice):
+            start, stop, step = env_ids.indices(self.num_envs)
+            env_ids = torch.arange(start, stop, step, device=self.device, dtype=torch.long)
+        super()._resample(env_ids)
+
     def _resample_command(self, env_ids: Sequence[int]):
         """Resample motion clips, reset robot state, and position objects for given envs.
 
@@ -2853,6 +2890,9 @@ class TrackingCommand(CommandTerm):
         Args:
             env_ids: Environment indices being reset.
         """
+        if len(env_ids) == 0:
+            return
+
         self.time_steps[env_ids] = 0
         # Variable frames: resample per-env num_frames at episode reset
         if self.variable_frames_enabled and len(env_ids) > 0:
@@ -3111,7 +3151,7 @@ class TrackingCommand(CommandTerm):
             # Move all other objects to inactive positions (far away from robot)
             # Spread objects vertically (Z-axis) - envs naturally separate in X,Y via env_origins
             inactive_base = INACTIVE_OBJECT_BASE_OFFSET.to(self.device)
-            inactive_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device).expand(
+            inactive_quat = torch.tensor([[0.0, 0.0, 0.0, 1.0]], device=self.device).expand(
                 len(env_ids), -1
             )
 
@@ -3176,7 +3216,7 @@ class TrackingCommand(CommandTerm):
                     pos = self.object_root_pos[env_idx, 0].clone()
                     pos[2] = 0.76  # Table height
                     pos[1] -= 0.15
-                    quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self._env.device)
+                    quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self._env.device)
                     table_pos_list.append(pos)
                     table_quat_list.append(quat)
 
@@ -3205,7 +3245,7 @@ class TrackingCommand(CommandTerm):
 
         delta_pos_w = robot_anchor_pos_w_repeat  # Root position of the robot
         delta_pos_w[..., 2] = anchor_pos_w_repeat[..., 2]
-        delta_ori_w = torch_transform.get_heading_q(
+        delta_ori_w = yaw_quat(
             quat_mul(robot_anchor_quat_w_repeat, quat_inv(anchor_quat_w_repeat))
         )
 
@@ -3253,7 +3293,7 @@ class TrackingCommand(CommandTerm):
 
             ray_starts_w = root_pos_w.unsqueeze(1).expand(-1, self.num_rays, -1)
             root_quat_expanded = (
-                torch_transform.get_heading_q(root_quat_w)
+                yaw_quat(root_quat_w)
                 .unsqueeze(1)
                 .expand(-1, self.num_rays, -1)
             )
@@ -3648,7 +3688,7 @@ class ForceTrackingCommand(CommandTerm):
         Returns:
             Tensor of shape ``(num_envs, num_bodies, 6, num_dof + 6)``.
         """
-        return self.robot.root_physx_view.get_jacobians()
+        return self.robot.data.body_link_jacobian_w.torch
 
     @property
     def eef_jacobian(self) -> torch.Tensor:

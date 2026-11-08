@@ -11,7 +11,7 @@ from isaaclab.sensors import CameraCfg, ContactSensorCfg, FrameTransformerCfg, T
 import isaaclab.sim as sim_utils
 from isaaclab.sim.utils import clone
 from isaaclab.terrains import TerrainImporterCfg
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 import joblib
 import pxr
 
@@ -865,8 +865,8 @@ class MySceneCfg(InteractiveSceneCfg):
             # Camera position and rotation offsets (relative to attached link)
             camera_pos_offset = tuple(cameras_cfg.get("camera_pos_offset", [0.0, 0.0, 0.0]))
             camera_rot_offset = tuple(
-                cameras_cfg.get("camera_rot_offset", [1.0, 0.0, 0.0, 0.0])
-            )  # wxyz quaternion
+                cameras_cfg.get("camera_rot_offset", [0.0, 0.0, 0.0, 1.0])
+            )  # Isaac Lab 3.0 XYZW identity quaternion
 
             # Camera data types (e.g., ["rgb"], ["rgb", "depth"])
             camera_data_types = cameras_cfg.get("camera_data_types", ["rgb"])
@@ -969,11 +969,13 @@ class ModularTrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = config.get("sim_dt", 0.005)
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
-        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        from isaaclab_physx.physics import PhysxCfg
 
-        # Increase collision stack size for scenes with complex collision meshes (e.g. staircases)
-        gpu_collision_stack_size_exp = config.get("gpu_collision_stack_size_exp", 26)
-        self.sim.physx.gpu_collision_stack_size = 2**gpu_collision_stack_size_exp
+        physics_cfg = PhysxCfg(
+            gpu_max_rigid_patch_count=10 * 2**15,
+            gpu_max_num_partitions=config.get("gpu_max_num_partitions", 8),
+            gpu_collision_stack_size=2 ** config.get("gpu_collision_stack_size_exp", 26),
+        )
 
         # Increase PhysX GPU memory only for multi-object scenes
         # These prevent "totalAggregatePairsCapacity" errors when many objects are spawned
@@ -984,9 +986,10 @@ class ModularTrackingEnvCfg(ManagerBasedRLEnvCfg):
         ):
             # With proper Z-spacing of initial positions, collision pairs should be minimal
             # These are moderate values that should work for 1000+ envs
-            self.sim.physx.gpu_found_lost_pairs_capacity = 2**24  # ~16M
-            self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 2**24
-            self.sim.physx.gpu_total_aggregate_pairs_capacity = 2**21  # ~2M
+            physics_cfg.gpu_found_lost_pairs_capacity = 2**24  # ~16M
+            physics_cfg.gpu_found_lost_aggregate_pairs_capacity = 2**24
+            physics_cfg.gpu_total_aggregate_pairs_capacity = 2**21  # ~2M
+        self.sim.physics = physics_cfg
 
         # Viewer settings
         viewer_config = config.get("viewer", {})

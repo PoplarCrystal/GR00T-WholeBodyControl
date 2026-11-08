@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import cv2
 import imageio
 from isaaclab.managers import manager_term_cfg, recorder_manager
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 from loguru import logger
 import numpy as np
 import torch
@@ -281,7 +281,7 @@ class TrajectoryRecorderTerm(recorder_manager.RecorderTerm):
             root_pos_rel = root_pos - env_origins[i].cpu().numpy()
             self._frame_data[i]["root_pos_w"].append(root_pos_rel)
 
-            # Root quaternion (wxyz)
+            # Isaac Lab 3.0 state quaternions are XYZW.
             root_quat = robot.data.root_quat_w[i].cpu().numpy().copy()
             self._frame_data[i]["root_quat_w"].append(root_quat)
 
@@ -329,7 +329,7 @@ class TrajectoryRecorderTerm(recorder_manager.RecorderTerm):
                 "dof_pos": np.array(data["dof_pos"]),
                 "root_pos_w": np.array(data["root_pos_w"]),
                 "root_quat_w": np.array(data["root_quat_w"]),
-                "quat_format": "wxyz",
+                "quat_format": "xyzw",
                 "fps": effective_fps,
                 "num_joints": data["dof_pos"][0].shape[0],
                 "total_frames": len(data["dof_pos"]),

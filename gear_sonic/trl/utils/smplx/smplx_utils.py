@@ -244,7 +244,7 @@ def make_smplx(type="neu_fullpose", **kwargs):
 
 def load_parents(npz_path="models/smplx/SMPLX_NEUTRAL.npz"):
     smplx_struct = np.load("models/smplx/SMPLX_NEUTRAL.npz", allow_pickle=True)
-    parents = smplx_struct["kintree_table"][0].astype(np.long)
+    parents = smplx_struct["kintree_table"][0].astype(np.int64)
     parents[0] = -1
     return parents
 

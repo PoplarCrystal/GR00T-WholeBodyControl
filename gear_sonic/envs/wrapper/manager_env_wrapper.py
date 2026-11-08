@@ -1520,7 +1520,7 @@ class ManagerEnvWrapper:
                             meta.get("table_pos", [0.0, 0.0, 0.8]), device=self.device
                         ).float()
                         quat = torch.tensor(
-                            meta.get("table_quat", [1.0, 0.0, 0.0, 0.0]), device=self.device
+                            meta.get("table_quat", [0.0, 0.0, 0.0, 1.0]), device=self.device
                         ).float()
                         scale = torch.tensor(
                             meta.get("table_scale", [1.0, 1.0, 1.0]), device=self.device
@@ -1550,7 +1550,7 @@ class ManagerEnvWrapper:
                                 torch.tensor([0.0, 0.0, 0.8], device=self.device).float()
                             )
                             table_quat_list.append(
-                                torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).float()
+                                torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device).float()
                             )
                             table_scale_list.append(
                                 torch.tensor([1.0, 1.0, 1.0], device=self.device).float()
@@ -1561,7 +1561,7 @@ class ManagerEnvWrapper:
                             torch.tensor([0.0, 0.0, 0.8], device=self.device).float()
                         )
                         table_quat_list.append(
-                            torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).float()
+                                torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device).float()
                         )
                         table_scale_list.append(
                             torch.tensor([1.0, 1.0, 1.0], device=self.device).float()
@@ -2008,7 +2008,7 @@ class ManagerEnvWrapper:
                 )[:, 0].clone()
                 table_pos[:, 2] = 0.76  # Table height
                 table_pos[:, 1] -= 0.15
-                table_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device).repeat(
+                table_quat = torch.tensor([[0.0, 0.0, 0.0, 1.0]], device=self.device).repeat(
                     len(self._replay_env_ids), 1
                 )
 
