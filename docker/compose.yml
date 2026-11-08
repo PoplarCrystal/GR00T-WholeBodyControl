@@ -1,0 +1,29 @@
+name: sonic
+
+services:
+  sonic:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: sonic:lab3.0
+    working_dir: /workspace/sonic
+    environment:
+      ACCEPT_EULA: "Y"
+      DISPLAY: ${DISPLAY:-:0}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    volumes:
+      - ../gear_sonic:/workspace/sonic/gear_sonic
+      - ../logs_rl:/workspace/sonic/logs_rl
+      - ../sample_data:/workspace/sonic/sample_data
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    shm_size: 16gb
+    stdin_open: true
+    tty: true
