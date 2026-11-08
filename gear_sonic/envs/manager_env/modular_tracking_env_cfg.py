@@ -1090,3 +1090,8 @@ class ModularTrackingEnvCfg(ManagerBasedRLEnvCfg):
             self.curriculum.force_push_linear_curriculum.params["modify_fn"] = getattr(
                 module, "linear_curriculum"
             )
+
+        if self.presets == "newton" and config.get("use_warp_env", False):
+            from gear_sonic.envs.manager_env.mdp_warp.env_profile import apply_warp_env_profile
+
+            apply_warp_env_profile(self, config.get("manager_call_config", None))

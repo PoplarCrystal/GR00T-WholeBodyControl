@@ -107,6 +107,15 @@ def create_manager_env(config, device, args_cli):
     selected_preset = config.get("presets", "physx")
     if selected_preset not in ("physx", "newton"):
         raise ValueError(f"Unsupported presets={selected_preset!r}; expected 'physx' or 'newton'.")
+    use_warp_env = bool(config.manager_env.config.get("use_warp_env", False))
+    if use_warp_env and selected_preset != "newton":
+        raise ValueError("use_warp_env requires presets=newton.")
+    if use_warp_env:
+        from isaaclab_experimental.envs import ManagerBasedRLEnvWarp
+
+        EnvClass = ManagerBasedRLEnvWarp
+    else:
+        EnvClass = ManagerBasedRLEnv
     env_instance_cfg = custom_instantiate(config.manager_env, presets=selected_preset)
 
     # Iteratively check the difference in attribute of env_instance_cfg1 and env_instance_cfg, print out the difference
@@ -147,7 +156,7 @@ def create_manager_env(config, device, args_cli):
     env_instance_cfg.seed = config.seed
     env_instance_cfg.sim.device = device
     env_instance_cfg.config["headless"] = args_cli.headless
-    env = ManagerBasedRLEnv(
+    env = EnvClass(
         cfg=env_instance_cfg, render_mode="rgb_array" if not args_cli.headless else None
     )
 

@@ -30,6 +30,8 @@ config:
   decimation: 4
   episode_length_s: 10.0
   sim_dt: 0.005
+  use_warp_env: false # Experimental Warp managers; requires presets=newton.
+  manager_call_config: {default: 1} # 1: eager Warp, 2: CUDA graph where supported.
   viewer_eye: [4.5, 0.0, 6.0]
   viewer_lookat: [0.0, 0.0, 2.0]
   render_results: false

@@ -2894,6 +2894,7 @@ class TrackingCommand(CommandTerm):
             env_ids: Environment indices being reset.
         """
         if len(env_ids) == 0:
+            self._update_relative_targets()
             return
 
         self.time_steps[env_ids] = 0
@@ -3237,6 +3238,10 @@ class TrackingCommand(CommandTerm):
                 table_root_pose = torch.cat([table_pos, table_quat], dim=-1)
                 table.write_root_pose_to_sim(table_root_pose, env_ids=env_ids)
 
+        self._update_relative_targets()
+
+    def _update_relative_targets(self):
+        """Refresh reference targets in the current robot heading frame."""
         anchor_pos_w_repeat = self.anchor_pos_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
         anchor_quat_w_repeat = self.anchor_quat_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
         robot_anchor_pos_w_repeat = self.robot_anchor_pos_w[:, None, :].repeat(
